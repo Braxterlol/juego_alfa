@@ -386,6 +386,7 @@ class AplicacionAlfabetizacion:
         # Inicializar componentes
         self.gestor_puntuacion = GestorPuntuacion()
         self.generador_feedback = GeneradorRetroalimentacion()
+        self.semaforo_actividades = threading.Semaphore(1)
         self.modo_actual = None
         self.nivel_actual = 1
         self.actividad_actual = None
@@ -399,8 +400,9 @@ class AplicacionAlfabetizacion:
         # Controles de UI
         self.inicializar_controles()
 
-        self.btn_cambiar_modo = Boton(350, 520, 180, 50, "Cambiar Modo", accion=self.volver_menu)
-        self.mostrar_btn_cambiar_modo = False
+        # Mostrar botón "Cambiar Modo" desde el inicio
+        self.btn_cambiar_modo = Boton(self.ancho // 2 - 90, 520, 180, 50, "Cambiar Modo", accion=self.volver_menu)
+        self.mostrar_btn_cambiar_modo = True
         
         # Crear fábricas
         self.fabricas = {
@@ -426,7 +428,6 @@ class AplicacionAlfabetizacion:
     def volver_menu(self):
         """Vuelve al menú principal para seleccionar un nuevo modo"""
         self.estado = "menu"
-        self.mostrar_btn_cambiar_modo = False
         self.mensaje_feedback = ""
         self.mensaje_pista = ""
 
@@ -451,8 +452,15 @@ class AplicacionAlfabetizacion:
         # Botones y elementos del juego
         self.elementos_botones = []
         self.checkboxes_rimas = []
-        self.btn_verificar = Boton(350, 450, 120, 50, "Verificar", accion=self.verificar_respuesta)
-        self.btn_borrar = Boton(480, 450, 120, 50, "Borrar", accion=self.borrar_respuesta)
+        
+        # Centrar los botones de verificar y borrar
+        ancho_btn = 120
+        espacio = 10
+        ancho_total = (ancho_btn * 2) + espacio
+        x_inicial = (self.ancho - ancho_total) // 2
+        
+        self.btn_verificar = Boton(x_inicial, 450, ancho_btn, 50, "Verificar", accion=self.verificar_respuesta)
+        self.btn_borrar = Boton(x_inicial + ancho_btn + espacio, 450, ancho_btn, 50, "Borrar", accion=self.borrar_respuesta)
     
     def seleccionar_modo(self, indice):
         self.modo_seleccionado = indice
@@ -467,28 +475,32 @@ class AplicacionAlfabetizacion:
             btn.color = COLOR_BOTON_SELECCIONADO if i == nivel-1 else COLOR_BOTON
     
     def iniciar_actividad(self):
-        if not hasattr(self, 'modo_seleccionado') or not hasattr(self, 'nivel_seleccionado'):
-            self.mensaje_modal = "Por favor, selecciona un modo y un nivel antes de comenzar."
-            self.mostrar_modal = True
-            return
+        self.semaforo_actividades.acquire()
+        try:
+            if not hasattr(self, 'modo_seleccionado') or not hasattr(self, 'nivel_seleccionado'):
+                self.mensaje_modal = "Por favor, selecciona un modo y un nivel antes de comenzar."
+                self.mostrar_modal = True
+                return
         
-        # Mapear selección a modo
-        modos = ["letras", "silabas", "rimas"]
-        self.modo_actual = modos[self.modo_seleccionado]
-        self.nivel_actual = self.nivel_seleccionado
-        
-        # Crear actividad
-        fabrica = self.fabricas[self.modo_actual]
-        self.actividad_actual = fabrica.crear_actividad(self.nivel_actual)
-        
-        # Cambiar estado
-        self.estado = "juego"
-        self.respuesta_actual = ""
-        self.mensaje_feedback = ""
-        self.mensaje_pista = ""
-        
-        # Crear botones para elementos
-        self.crear_botones_elementos()
+            # Mapear selección a modo
+            modos = ["letras", "silabas", "rimas"]
+            self.modo_actual = modos[self.modo_seleccionado]
+            self.nivel_actual = self.nivel_seleccionado
+            
+            # Crear actividad
+            fabrica = self.fabricas[self.modo_actual]
+            self.actividad_actual = fabrica.crear_actividad(self.nivel_actual)
+            
+            # Cambiar estado
+            self.estado = "juego"
+            self.respuesta_actual = ""
+            self.mensaje_feedback = ""
+            self.mensaje_pista = ""
+            
+            # Crear botones para elementos
+            self.crear_botones_elementos()
+        finally:
+            self.semaforo_actividades.release()
     
     def avanzar_nivel(self):
         """Avanza al siguiente nivel manteniendo el mismo modo de juego"""
@@ -508,7 +520,6 @@ class AplicacionAlfabetizacion:
             # Si estamos en el nivel máximo, mostrar mensaje de felicitación
             self.mensaje_modal = "¡Felicidades! Has completado todos los niveles de este modo. Prueba con otro modo de juego."
             self.mostrar_modal = True
-            self.mostrar_btn_cambiar_modo = True
         
         # Crear nueva actividad con el nivel actualizado
         fabrica = self.fabricas[self.modo_actual]
@@ -525,17 +536,33 @@ class AplicacionAlfabetizacion:
         if self.actividad_actual.datos["tipo"] == "rimas":
             # Crear checkboxes para rimas
             palabras = self.actividad_actual.datos["elementos"]
-            y_base = 300
+            
+            # Modificar la posición base para evitar superponerse con la retroalimentación
+            y_base = 180  # Cambiado de 300 a 180 para mover los checkboxes hacia arriba
+            
+            # Calcular el espacio disponible y distribuir los checkboxes de manera más organizada
+            altura_total = min(30 * len(palabras), 180)  # Limitar la altura total
+            espacio_vertical = altura_total / len(palabras)
+            
             for i, palabra in enumerate(palabras):
-                checkbox = Checkbox(300, y_base + i*40, 200, 30, palabra)
+                # Usar dos columnas si hay muchas palabras
+                if len(palabras) > 4 and i >= len(palabras) // 2:
+                    # Segunda columna
+                    x_pos = 420
+                    y_pos = y_base + (i - len(palabras) // 2) * espacio_vertical
+                else:
+                    # Primera columna
+                    x_pos = 200
+                    y_pos = y_base + i * espacio_vertical
+                    
+                checkbox = Checkbox(x_pos, y_pos, 200, 30, palabra)
                 self.checkboxes_rimas.append(checkbox)
         else:
-            # Crear botones para letras o sílabas
+            # El código original para letras o sílabas se mantiene igual
             elementos = self.actividad_actual.datos["elementos"]
             ancho_boton = min(60, (self.ancho - 200) // len(elementos))
             for i, elemento in enumerate(elementos):
                 x = (self.ancho - (ancho_boton * len(elementos))) // 2 + i * ancho_boton
-                # Asignar un ID único a cada botón basado en su posición
                 btn = Boton(x, 300, ancho_boton-5, 50, elemento, accion=self.agregar_elemento, param=(i, elemento))
                 self.elementos_botones.append(btn)
         
@@ -606,185 +633,59 @@ class AplicacionAlfabetizacion:
                     solucion = self.actividad_actual.datos["solucion"]
                 self.mensaje_pista = f"La respuesta correcta era: {solucion}"
                 # Programar nueva actividad después de un breve retraso
-                pygame.time.set_timer(pygame.USEREVENT, 3000, True)  # Evento único
+                pygame.time.set_timer(pygame.USEREVENT, 2000, True)
     
     def _monitorear_progreso(self):
-        # Este método corre en un hilo separado
+        """Función que corre en un hilo separado para monitorear el progreso del jugador"""
         while not self.evento_terminar.is_set():
-            with self.gestor_puntuacion.lock:
-                puntuacion = self.gestor_puntuacion.puntuacion
-                if self.gestor_puntuacion.verificar_hito(puntuacion):
-                    self.mostrar_modal = True
-                    self.mensaje_modal = f"¡Felicitaciones! ¡Has alcanzado {puntuacion} puntos! ¡Sigue así!"
+            puntuacion = self.gestor_puntuacion.obtener_puntuacion()
             
-            # Dormir para no consumir recursos
-            time.sleep(0.5)
-    
-    def dibujar_menu(self):
-        # Título
-        titulo = FUENTE_GRANDE.render("Aprende Jugando - Formación de Palabras", True, COLOR_TEXTO)
-        self.pantalla.blit(titulo, (self.ancho//2 - titulo.get_width()//2, 70))
-        
-        # Subtítulo modo
-        subtitulo = FUENTE_MEDIA.render("Selecciona un modo de juego:", True, COLOR_TEXTO)
-        self.pantalla.blit(subtitulo, (self.ancho//2 - subtitulo.get_width()//2, 120))
-        
-        # Botones de modo
-        for btn in self.btn_modos:
-            btn.dibujar(self.pantalla)
-        
-        # Subtítulo nivel
-        subtitulo = FUENTE_MEDIA.render("Selecciona un nivel:", True, COLOR_TEXTO)
-        self.pantalla.blit(subtitulo, (self.ancho//2 - subtitulo.get_width()//2, 220))
-        
-        # Botones de nivel
-        for btn in self.btn_niveles:
-            btn.dibujar(self.pantalla)
-        
-        # Botón iniciar
-        self.btn_iniciar.dibujar(self.pantalla)
-    
-    def dibujar_juego(self):
-        # Título
-        titulo = FUENTE_GRANDE.render(f"Modo: {self.modos[self.modo_seleccionado]} - {self.niveles[self.nivel_actual-1]}", True, COLOR_TEXTO)
-        self.pantalla.blit(titulo, (self.ancho//2 - titulo.get_width()//2, 50))
-        
-        # Instrucción
-        instruccion = FUENTE_MEDIA.render(self.actividad_actual.datos["instruccion"], True, COLOR_TEXTO)
-        self.pantalla.blit(instruccion, (self.ancho//2 - instruccion.get_width()//2, 100))
-        
-        # Para rimas, mostrar palabra base
-        # Para rimas, mostrar palabra base
-        if self.actividad_actual.datos["tipo"] == "rimas":
-            palabra_base = FUENTE_MEDIA.render(f"Palabra base: {self.actividad_actual.datos['palabra_base']}", True, COLOR_TEXTO)
-            self.pantalla.blit(palabra_base, (self.ancho//2 - palabra_base.get_width()//2, 150))
-        
-        # Dibujar respuesta actual o elementos según el tipo
-        if self.actividad_actual.datos["tipo"] == "rimas":
-            # Dibujar checkboxes para rimas
-            for checkbox in self.checkboxes_rimas:
-                checkbox.dibujar(self.pantalla)
-        else:
-            # Mostrar respuesta actual
-            respuesta = FUENTE_GRANDE.render(self.respuesta_actual, True, COLOR_TEXTO)
-            pygame.draw.rect(self.pantalla, (220, 220, 220), (250, 200, 300, 60), border_radius=10)
-            self.pantalla.blit(respuesta, (self.ancho//2 - respuesta.get_width()//2, 220))
+            # Verificar si se alcanzó un hito
+            if self.gestor_puntuacion.verificar_hito(puntuacion):
+                # No podemos interactuar directamente con Pygame desde otro hilo
+                # Enviar un evento personalizado para mostrar mensaje
+                evento_hito = pygame.event.Event(pygame.USEREVENT + 2, {"puntuacion": puntuacion})
+                pygame.event.post(evento_hito)
             
-            # Botones de elementos
-            for btn in self.elementos_botones:
-                btn.dibujar(self.pantalla)
-        
-        # Botones de acción
-        self.btn_verificar.dibujar(self.pantalla)
-        self.btn_borrar.dibujar(self.pantalla)
-        
-        # Feedback
-        if self.mensaje_feedback:
-            tiempo_actual = pygame.time.get_ticks()
-            if tiempo_actual - self.timer_feedback < 5000:  # Mostrar por 5 segundos
-                feedback = FUENTE_MEDIA.render(self.mensaje_feedback, True, self.color_feedback)
-                self.pantalla.blit(feedback, (self.ancho//2 - feedback.get_width()//2, 520))
-        
-        # Pista
-        if self.mensaje_pista:
-            pista = FUENTE_PISTA.render(self.mensaje_pista, True, COLOR_PISTA)
-            self.pantalla.blit(pista, (self.ancho//2 - pista.get_width()//2, 550))
-        
-        # Puntuación
-        puntuacion = FUENTE_PEQUEÑA.render(f"Puntuación: {self.gestor_puntuacion.obtener_puntuacion()}", True, COLOR_TEXTO)
-        self.pantalla.blit(puntuacion, (20, 20))
-        
-        self.btn_cambiar_modo.dibujar(self.pantalla)
-    
-    def dibujar_modal(self):
-        """Dibuja un mensaje modal en pantalla"""
-        # Fondo semitransparente
-        superficie = pygame.Surface((self.ancho, self.alto), pygame.SRCALPHA)
-        pygame.draw.rect(superficie, (0, 0, 0, 128), superficie.get_rect())
-        self.pantalla.blit(superficie, (0, 0))
-        
-        # Ventana modal
-        ancho_modal, alto_modal = 500, 200
-        modal_rect = pygame.Rect((self.ancho - ancho_modal) // 2, (self.alto - alto_modal) // 2, ancho_modal, alto_modal)
-        pygame.draw.rect(self.pantalla, (240, 240, 255), modal_rect, border_radius=15)
-        pygame.draw.rect(self.pantalla, (70, 130, 180), modal_rect, 3, border_radius=15)
-        
-        # Mensaje
-        lineas = self._wrap_text(self.mensaje_modal, ancho_modal - 40)
-        y_offset = modal_rect.y + 40
-        for linea in lineas:
-            texto = FUENTE_MEDIA.render(linea, True, COLOR_TEXTO)
-            self.pantalla.blit(texto, (modal_rect.centerx - texto.get_width()//2, y_offset))
-            y_offset += 30
-        
-        # Botón de cerrar
-        cerrar_rect = pygame.Rect(modal_rect.centerx - 60, modal_rect.bottom - 50, 120, 35)
-        pygame.draw.rect(self.pantalla, COLOR_BOTON, cerrar_rect, border_radius=8)
-        pygame.draw.rect(self.pantalla, (50, 50, 50), cerrar_rect, 2, border_radius=8)
-        texto = FUENTE_PEQUEÑA.render("Continuar", True, (255, 255, 255))
-        self.pantalla.blit(texto, (cerrar_rect.centerx - texto.get_width()//2, cerrar_rect.centery - texto.get_height()//2))
- 
-    def _wrap_text(self, texto, ancho_max):
-        """Divide el texto en líneas para ajustarse al ancho máximo"""
-        palabras = texto.split(' ')
-        lineas = []
-        linea_actual = []
-        
-        for palabra in palabras:
-            linea_prueba = ' '.join(linea_actual + [palabra])
-            ancho_texto = FUENTE_MEDIA.size(linea_prueba)[0]
-            
-            if ancho_texto <= ancho_max:
-                linea_actual.append(palabra)
-            else:
-                lineas.append(' '.join(linea_actual))
-                linea_actual = [palabra]
-        
-        if linea_actual:
-            lineas.append(' '.join(linea_actual))
-        
-        return lineas
+            # Esperar un tiempo antes de la siguiente verificación
+            time.sleep(1)
     
     def ejecutar(self):
         reloj = pygame.time.Clock()
         ejecutando = True
         
         while ejecutando:
-            # Manejar eventos
             for evento in pygame.event.get():
                 if evento.type == pygame.QUIT:
                     ejecutando = False
-                    self.evento_terminar.set()  # Señalizar finalización al hilo
+                elif evento.type == pygame.USEREVENT:
+                    # Evento para nueva actividad en el mismo nivel
+                    if self.estado == "juego":
+                        fabrica = self.fabricas[self.modo_actual]
+                        self.actividad_actual = fabrica.crear_actividad(self.nivel_actual)
+                        self.respuesta_actual = ""
+                        self.mensaje_feedback = ""
+                        self.mensaje_pista = ""
+                        self.crear_botones_elementos()
+                elif evento.type == pygame.USEREVENT + 1:
+                    # Evento para avanzar de nivel
+                    if self.estado == "juego":
+                        self.avanzar_nivel()
+                elif evento.type == pygame.USEREVENT + 2:
+                    # Evento para mostrar mensaje de hito
+                    puntuacion = evento.dict["puntuacion"]
+                    self.mensaje_modal = f"¡Felicidades! Has alcanzado {puntuacion} puntos."
+                    self.mostrar_modal = True
                 
-                elif evento.type == pygame.USEREVENT:  # Evento para nueva actividad
-                    fabrica = self.fabricas[self.modo_actual]
-                    self.actividad_actual = fabrica.crear_actividad(self.nivel_actual)
-                    self.respuesta_actual = ""
-                    self.mensaje_feedback = ""
-                    self.mensaje_pista = ""
-                    self.crear_botones_elementos()
-                
-                elif evento.type == pygame.USEREVENT + 1:  # Evento para avanzar nivel
-                    self.avanzar_nivel()
-                
-                elif self.mostrar_modal:
-                    # Clic en botón continuar
-                    if evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1:
-                        modal_rect = pygame.Rect((self.ancho - 500) // 2, (self.alto - 200) // 2, 500, 200)
-                        cerrar_rect = pygame.Rect(modal_rect.centerx - 60, modal_rect.bottom - 50, 120, 35)
-                        if cerrar_rect.collidepoint(evento.pos):
-                            self.mostrar_modal = False
-                
-                elif self.estado == "menu":
-                    # Manejar clicks en botones del menú
+                # Manejar clics en botones según el estado actual
+                if self.estado == "menu":
                     for btn in self.btn_modos:
                         btn.manejar_evento(evento)
                     for btn in self.btn_niveles:
                         btn.manejar_evento(evento)
                     self.btn_iniciar.manejar_evento(evento)
-                
+                    
                 elif self.estado == "juego":
-                    # Manejar clicks en botones del juego
                     if self.actividad_actual.datos["tipo"] == "rimas":
                         for checkbox in self.checkboxes_rimas:
                             checkbox.manejar_evento(evento)
@@ -792,16 +693,20 @@ class AplicacionAlfabetizacion:
                         for btn in self.elementos_botones:
                             btn.manejar_evento(evento)
                     
-                    if self.mostrar_btn_cambiar_modo:
-                        self.btn_cambiar_modo.manejar_evento(evento)
-                    
                     self.btn_verificar.manejar_evento(evento)
                     self.btn_borrar.manejar_evento(evento)
+                    
+                    if self.mostrar_btn_cambiar_modo:
+                        self.btn_cambiar_modo.manejar_evento(evento)
+                
+                # Cerrar modal con clic
+                if self.mostrar_modal and evento.type == pygame.MOUSEBUTTONDOWN:
+                    self.mostrar_modal = False
             
-            # Dibujar fondo
+            # Dibujar interfaz
             self.pantalla.fill(COLOR_FONDO)
             
-            # Dibujar según estado
+            # Dibujar elementos según el estado actual
             if self.estado == "menu":
                 self.dibujar_menu()
             elif self.estado == "juego":
@@ -811,14 +716,142 @@ class AplicacionAlfabetizacion:
             if self.mostrar_modal:
                 self.dibujar_modal()
             
-            # Actualizar pantalla
             pygame.display.flip()
-            reloj.tick(60)  # Limitar a 60 FPS
+            reloj.tick(60)
         
+        # Terminar hilo de monitoreo al salir
+        self.evento_terminar.set()
+        self.hilo_progreso.join()
         pygame.quit()
         sys.exit()
+    
+    def dibujar_menu(self):
+        # Dibujar título
+        titulo = FUENTE_GRANDE.render("Aprende Jugando - Actividades de Alfabetización", True, COLOR_TEXTO)
+        self.pantalla.blit(titulo, (self.ancho // 2 - titulo.get_width() // 2, 50))
+        
+        # Dibujar subtítulos
+        subtitulo1 = FUENTE_MEDIA.render("Selecciona un modo de juego:", True, COLOR_TEXTO)
+        self.pantalla.blit(subtitulo1, (100, 120))
+        
+        subtitulo2 = FUENTE_MEDIA.render("Selecciona un nivel:", True, COLOR_TEXTO)
+        self.pantalla.blit(subtitulo2, (100, 220))
+        
+        # Dibujar botones
+        for btn in self.btn_modos:
+            btn.dibujar(self.pantalla)
+        
+        for btn in self.btn_niveles:
+            btn.dibujar(self.pantalla)
+        
+        self.btn_iniciar.dibujar(self.pantalla)
+        
+        # Dibujar puntuación actual
+        puntuacion = FUENTE_MEDIA.render(f"Puntuación: {self.gestor_puntuacion.obtener_puntuacion()}", True, COLOR_TEXTO)
+        self.pantalla.blit(puntuacion, (self.ancho - puntuacion.get_width() - 20, 20))
+    
+    def dibujar_juego(self):
+        # Dibujar instrucción
+        instruccion = FUENTE_GRANDE.render(self.actividad_actual.datos["instruccion"], True, COLOR_TEXTO)
+        self.pantalla.blit(instruccion, (self.ancho // 2 - instruccion.get_width() // 2, 50))
+        
+        # Dibujar área de respuesta si no son rimas
+        if self.actividad_actual.datos["tipo"] != "rimas":
+            pygame.draw.rect(self.pantalla, (255, 255, 255), (200, 120, 400, 60), border_radius=10)
+            pygame.draw.rect(self.pantalla, (100, 100, 100), (200, 120, 400, 60), 2, border_radius=10)
+            
+            if self.respuesta_actual:
+                respuesta = FUENTE_GRANDE.render(self.respuesta_actual, True, COLOR_TEXTO)
+                self.pantalla.blit(respuesta, (self.ancho // 2 - respuesta.get_width() // 2, 140))
+        else:
+            # Para rimas, mostrar la palabra base
+            palabra_base = FUENTE_GRANDE.render(f"Palabra: {self.actividad_actual.datos['palabra_base']}", True, COLOR_TEXTO)
+            self.pantalla.blit(palabra_base, (self.ancho // 2 - palabra_base.get_width() // 2, 120))
+        
+        # Dibujar elementos según el tipo
+        if self.actividad_actual.datos["tipo"] == "rimas":
+            for checkbox in self.checkboxes_rimas:
+                checkbox.dibujar(self.pantalla)
+        else:
+            for btn in self.elementos_botones:
+                btn.dibujar(self.pantalla)
+        
+        # Dibujar botones de control
+        self.btn_verificar.dibujar(self.pantalla)
+        self.btn_borrar.dibujar(self.pantalla)
+        
+        if self.mostrar_btn_cambiar_modo:
+            self.btn_cambiar_modo.dibujar(self.pantalla)
+        
+        # Dibujar feedback
+        if self.mensaje_feedback:
+            tiempo_actual = pygame.time.get_ticks()
+            if tiempo_actual - self.timer_feedback < 5000:  # Mostrar por 5 segundos
+                feedback = FUENTE_MEDIA.render(self.mensaje_feedback, True, self.color_feedback)
+                self.pantalla.blit(feedback, (self.ancho // 2 - feedback.get_width() // 2, 380))
+        
+        # Dibujar pista
+        if self.mensaje_pista:
+            pista = FUENTE_PISTA.render(self.mensaje_pista, True, COLOR_PISTA)
+            self.pantalla.blit(pista, (self.ancho // 2 - pista.get_width() // 2, 410))
+        
+        # Dibujar nivel y puntuación
+        nivel = FUENTE_PEQUEÑA.render(f"Nivel: {self.nivel_actual}", True, COLOR_TEXTO)
+        self.pantalla.blit(nivel, (20, 20))
+        
+        puntuacion = FUENTE_PEQUEÑA.render(f"Puntuación: {self.gestor_puntuacion.obtener_puntuacion()}", True, COLOR_TEXTO)
+        self.pantalla.blit(puntuacion, (self.ancho - puntuacion.get_width() - 20, 20))
+        
+        # Mostrar información sobre modo de juego
+        modo_texto = self.modos[self.modo_seleccionado]
+        modo = FUENTE_PEQUEÑA.render(f"Modo: {modo_texto}", True, COLOR_TEXTO)
+        self.pantalla.blit(modo, (20, 50))
+    
+    def dibujar_modal(self):
+        # Dibujar fondo semitransparente
+        s = pygame.Surface((self.ancho, self.alto), pygame.SRCALPHA)
+        s.fill((0, 0, 0, 128))
+        self.pantalla.blit(s, (0, 0))
+        
+        # Dibujar ventana modal
+        modal_width, modal_height = 500, 200
+        modal_x = self.ancho // 2 - modal_width // 2
+        modal_y = self.alto // 2 - modal_height // 2
+        pygame.draw.rect(self.pantalla, (255, 255, 255), (modal_x, modal_y, modal_width, modal_height), border_radius=15)
+        pygame.draw.rect(self.pantalla, (100, 100, 100), (modal_x, modal_y, modal_width, modal_height), 2, border_radius=15)
+        
+        # Dibujar mensaje
+        mensaje_lineas = self._dividir_texto(self.mensaje_modal, 60)
+        for i, linea in enumerate(mensaje_lineas):
+            texto = FUENTE_MEDIA.render(linea, True, COLOR_TEXTO)
+            self.pantalla.blit(texto, (self.ancho // 2 - texto.get_width() // 2, modal_y + 60 + i * 30))
+        
+        # Dibujar instrucción
+        instruccion = FUENTE_PEQUEÑA.render("Haz clic en cualquier lugar para continuar", True, COLOR_TEXTO)
+        self.pantalla.blit(instruccion, (self.ancho // 2 - instruccion.get_width() // 2, modal_y + modal_height - 40))
+    
+    def _dividir_texto(self, texto, max_caracteres):
+        """Divide un texto largo en líneas para mostrar en el modal"""
+        palabras = texto.split()
+        lineas = []
+        linea_actual = ""
+        
+        for palabra in palabras:
+            if len(linea_actual) + len(palabra) + 1 <= max_caracteres:
+                linea_actual += " " + palabra if linea_actual else palabra
+            else:
+                lineas.append(linea_actual)
+                linea_actual = palabra
+        
+        if linea_actual:
+            lineas.append(linea_actual)
+        
+        return lineas
 
-# Punto de entrada
-if __name__ == "__main__":
+# Función principal
+def main():
     app = AplicacionAlfabetizacion()
     app.ejecutar()
+
+if __name__ == "__main__":
+    main()
